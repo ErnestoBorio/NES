@@ -2,10 +2,20 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "Nes.h"
+#include "MemoryAccess.c"
 
-byte read_memory( void *parent_system, word address ) { return 0; }
-void write_memory( void *parent_system, word address, byte value ){}
+// How many PPU cycles until starting VBlank. 262 scanlines * 341 ppu cycles (one per pixel)
+#define VBlank_ppu_cycles 262 * 341
 
+static byte read_memory_disasm( void *parent_system, word address ){ return 0; };
+
+// -------------------------------------------------------------------------------
+static void initialize( Nes *this )
+{
+	this->ppu.vblank_flag = 0;
+	this->ppu.nmi_enabled = 1;
+	this->ppu.cycles = VBlank_ppu_cycles;
+}
 // -------------------------------------------------------------------------------
 Nes *Nes_Create()
 {	
@@ -14,11 +24,22 @@ Nes *Nes_Create()
 		return NULL;
 	}
 		
-	this->cpu = Cpu6502_Create( this, &this->ram[0x100],
-							read_memory, write_memory, read_memory );
+	this->cpu = Cpu6502_Create( this );
 	if( this->cpu == NULL ) {
 		return NULL;
 	}
+	
+	#ifdef _Cpu6502_Disassembler
+		this->cpu->stack = &this->ram[0x100];
+		this->cpu->read_memory_disasm = read_memory_disasm;
+	#endif
+	
+	this->prg_rom_count = 0;
+	this->prg_rom = NULL;
+	this->chr_rom_count = 0;
+	this->chr_rom = NULL;
+	
+	initialize( this );
 	
 	return this;
 }
@@ -36,19 +57,34 @@ void Nes_Free( Nes *this )
 }
 
 // -------------------------------------------------------------------------------
-void Nes_Initialize( Nes *this )
+void Nes_DoFrame( Nes *this )
 {
-	this->prg_rom_count = 0;
-	this->prg_rom = NULL;
-	this->chr_rom_count = 0;	
-	this->chr_rom = NULL;
+	int cpu_cycles;
+	while( this->ppu.cycles > 0 )
+	{
+		cpu_cycles = Cpu6502_CpuStep( this->cpu );
+		this->ppu.cycles -= 3 * cpu_cycles;
+	}
+	this->ppu.vblank_flag = 1;
+	if( this->ppu.nmi_enabled )
+	{
+		cpu_cycles = Cpu6502_NMI( this->cpu );
+		this->ppu.cycles -= 3 * cpu_cycles;
+	}
+	this->ppu.cycles += VBlank_ppu_cycles;	
 }
 
 // -------------------------------------------------------------------------------
 int Nes_LoadRom( Nes *this, FILE *rom_file )
 {
-	this->prg_rom = NULL;
-	this->chr_rom = NULL;
+	if( this->prg_rom != NULL ) {
+		free( this->prg_rom );
+		this->prg_rom = NULL;
+	}
+	if( this->chr_rom != NULL ) {
+		free( this->chr_rom );
+		this->chr_rom = NULL;
+	}
 	
 	rewind( rom_file );
 	byte header[10];

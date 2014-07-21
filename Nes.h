@@ -1,4 +1,7 @@
 
+#ifndef _Nes_h_
+	#define _Nes_h_
+
 #include <stdio.h>
 #include "Cpu6502.h"
 
@@ -22,9 +25,19 @@ typedef struct // Nes
 	int prg_rom_count; // How many 16kB PRG-ROM banks are present
 	
 	byte ram[RAM_size]; // Built-in 2kB of RAM
+	
+	struct
+	{
+		int cycles; // PPU cycles countdown to starting Vblank
+		byte vblank_flag;
+		byte nmi_enabled;
+	} ppu;
+	
 } Nes;
 
 Nes *Nes_Create();
 void Nes_Free( Nes *this );
-void Nes_Initialize( Nes *this );
 int Nes_LoadRom( Nes *this, FILE *rom_file );
+void Nes_DoFrame( Nes *this );
+
+#endif // #ifndef _Nes_h_

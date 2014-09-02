@@ -5,10 +5,7 @@
 #include <stdio.h>
 #include "Cpu6502.h"
 
-#ifndef false
-	#define false 0
-	#define true ! false
-#endif
+#define bit_value( _byte, bit_order ) ( ( _byte & ( 1 << bit_order ) ) >> bit_order )
 
 #define PRG_ROM_bank_size 0x4000 // PRG-ROM bank is 16kB
 #define CHR_ROM_bank_size 0x2000 // CHR-ROM bank is  8kB

@@ -1,13 +1,17 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include "Nes.h"
 #include "MemoryAccess.c"
 
 // How many PPU cycles until starting VBlank. 262 scanlines * 341 ppu cycles (one per pixel)
 #define VBlank_ppu_cycles 262 * 341
 
-static byte read_memory_disasm( void *parent_system, word address ){ return 0; };
+#ifdef _Cpu6502_Disassembler
+	static byte read_memory_disasm( void *parent_system, word address );
+#endif
+static void builtin_memory_handlers_init( Nes *this );
 
 // -------------------------------------------------------------------------------
 static void initialize( Nes *this )
@@ -28,6 +32,7 @@ Nes *Nes_Create()
 	if( this->cpu == NULL ) {
 		return NULL;
 	}
+	Cpu6502_Initialize( this->cpu );
 	
 	#ifdef _Cpu6502_Disassembler
 		this->cpu->stack = &this->ram[0x100];
@@ -40,6 +45,7 @@ Nes *Nes_Create()
 	this->chr_rom = NULL;
 	
 	initialize( this );
+	builtin_memory_handlers_init( this );
 	
 	return this;
 }
@@ -62,6 +68,9 @@ void Nes_DoFrame( Nes *this )
 	int cpu_cycles;
 	while( this->ppu.cycles > 0 )
 	{
+		#ifdef _Cpu6502_Disassembler
+			Cpu6502_Disassemble( this->cpu, false );
+		#endif
 		cpu_cycles = Cpu6502_CpuStep( this->cpu );
 		this->ppu.cycles -= 3 * cpu_cycles;
 	}
@@ -126,6 +135,7 @@ int Nes_LoadRom( Nes *this, FILE *rom_file )
 		fprintf( stderr, "The rom file didn't end after CHR-ROM banks as expected.\n" );
 	}
 	
+	Cpu6502_Reset( this->cpu );	
 	return true;
 	
 Exception:
@@ -140,6 +150,55 @@ Exception:
 	}	
 	return false;
 }
+
+// -------------------------------------------------------------------------------
+// Handlers for internal memory of the NES, not from the cartridge
+static void builtin_memory_handlers_init( Nes *this )
+{
+	int i;
+	for( i=0; i<=0x7FF; ++i ) {
+		this->cpu->read_memory[i] = read_ram;
+		this->cpu->write_memory[i] = write_ram;		
+	}
+	for( i=0x800; i<=0x1FFF; ++i ) {
+		this->cpu->read_memory[i] = read_ram_mirror;
+		this->cpu->write_memory[i] = write_ram_mirror;
+	}	
+	for( i=0x2000; i<=0x3FFF; i += 8 ) {
+		this->cpu->write_memory[i] = write_ppu_control1;
+		this->cpu->read_memory[i] = read_unimplemented;
+	}
+	for( i=0x2001; i<=0x3FFF; i += 8 ) {
+		this->cpu->write_memory[i] = write_ppu_control2;
+		this->cpu->read_memory[i] = read_unimplemented;
+	}
+	for( i=0x2002; i<=0x3FFF; i += 8 ) {
+		this->cpu->read_memory[i] = read_ppu_status;
+		this->cpu->write_memory[i] = write_unimplemented;
+	}
+	for( i=0x2003; i<=0x7FFF; ++i ) {
+		this->cpu->read_memory[i] = read_unimplemented;
+		this->cpu->write_memory[i] = write_unimplemented;
+	}
+	for( i=0x8000; i<=0xFFFF; ++i ) {
+		this->cpu->read_memory[i] = read_prg_rom;
+		this->cpu->write_memory[i] = write_unimplemented;
+	}
+}
+
+// -------------------------------------------------------------------------------
+#ifdef _Cpu6502_Disassembler
+static byte read_memory_disasm( void *sys, word address )
+{
+	if( address >= 0x8000 ) {
+		return read_prg_rom( sys, address );
+	}
+	else {
+		assert( 0 );
+	}
+}
+#endif
+
 
 
 

@@ -44,7 +44,7 @@ static byte read_prg_rom( void *sys, word address )
 static byte read_ppu_status( void *sys, word address )
 {
 	byte value = ((Nes*)sys)->ppu.vblank_flag <<7;
-	((Nes*)sys)->ppu.vblank_flag = 0;
+	((Nes*)sys)->ppu.vblank_flag = 0; // reset flag once read
 	printf( "Read from $%04X : $%02X\n", address, value );
 	return  value;
 }

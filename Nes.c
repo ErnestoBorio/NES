@@ -80,6 +80,11 @@ void Nes_DoFrame( Nes *this )
 		cpu_cycles = Cpu6502_NMI( this->cpu );
 		this->ppu.cycles -= 3 * cpu_cycles;
 	}
+   #ifdef _Cpu6502_Disassembler
+      else {
+         printf( "NMI Reached but disabled.\n" );
+      }
+   #endif
 	this->ppu.cycles += VBlank_ppu_cycles;	
 }
 
@@ -117,7 +122,7 @@ int Nes_LoadRom( Nes *this, FILE *rom_file )
 	// The CHR-ROM banks immediately follow the PRG-ROM banks, no fseek() needed
 	this->chr_rom_count = (int) header[5];
 	if( this->chr_rom_count == 0 ) {
-		this->chr_rom_count = 1; // WIP: it's like this this or it has only CHR-RAM?
+		this->chr_rom_count = 1; // WIP: CHR-ROM count of 0 means 1 as most docs say or does it mean it has only CHR-RAM?
 	}
 	this->chr_rom = (byte*) malloc( this->chr_rom_count * CHR_ROM_bank_size );
 	if( this->chr_rom == NULL ) {
@@ -152,7 +157,6 @@ Exception:
 }
 
 // -------------------------------------------------------------------------------
-// Handlers for internal memory of the NES, not from the cartridge
 static void builtin_memory_handlers_init( Nes *this )
 {
 	int i;
@@ -163,7 +167,12 @@ static void builtin_memory_handlers_init( Nes *this )
 	for( i=0x800; i<=0x1FFF; ++i ) {
 		this->cpu->read_memory[i] = read_ram_mirror;
 		this->cpu->write_memory[i] = write_ram_mirror;
-	}	
+	}
+   // Default all registers as unimplemented and then overwrite each one as they are implemented
+   for( i=0x2000; i<=0x7FFF; ++i ) {
+      this->cpu->read_memory[i] = read_unimplemented;
+      this->cpu->write_memory[i] = write_unimplemented;
+   }
 	for( i=0x2000; i<=0x3FFF; i += 8 ) {
 		this->cpu->write_memory[i] = write_ppu_control1;
 		this->cpu->read_memory[i] = read_unimplemented;
@@ -174,10 +183,6 @@ static void builtin_memory_handlers_init( Nes *this )
 	}
 	for( i=0x2002; i<=0x3FFF; i += 8 ) {
 		this->cpu->read_memory[i] = read_ppu_status;
-		this->cpu->write_memory[i] = write_unimplemented;
-	}
-	for( i=0x2003; i<=0x7FFF; ++i ) {
-		this->cpu->read_memory[i] = read_unimplemented;
 		this->cpu->write_memory[i] = write_unimplemented;
 	}
 	for( i=0x8000; i<=0xFFFF; ++i ) {
@@ -198,23 +203,3 @@ static byte read_memory_disasm( void *sys, word address )
 	}
 }
 #endif
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

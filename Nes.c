@@ -193,13 +193,9 @@ static void builtin_memory_handlers_init( Nes *this )
 
 // -------------------------------------------------------------------------------
 #ifdef _Cpu6502_Disassembler
-static byte read_memory_disasm( void *sys, word address )
-{
-	if( address >= 0x8000 ) {
-		return read_prg_rom( sys, address );
-	}
-	else {
-		assert( 0 );
-	}
-}
+   static byte read_memory_disasm( void *sys, word address )
+   {
+      // For side effect reads, this should be avoided and direct access should be done instead.
+   	return ((Nes*)sys)->cpu->read_memory[address]( sys, address );
+   }
 #endif

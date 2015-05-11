@@ -11,6 +11,11 @@ static byte read_ram( void *sys, word address )
 static void write_ram( void *sys, word address, byte value )
 {
 	((Nes*)sys)->ram[address] = value;
+   #ifdef _Cpu6502_Disassembler
+      if( address == 2 || address == 3 ) {
+         printf("Wrote $%02X to $%02X", value, address );
+      }
+   #endif
 }
 
 // -------------------------------------------------------------------------------
@@ -23,8 +28,13 @@ static byte read_ram_mirror( void *sys, word address )
 
 static void write_ram_mirror( void *sys, word address, byte value )
 {
+    #ifdef _Cpu6502_Disassembler
+      if( address == 2 || address == 3 ) {
+         printf("Wrote $%02X to $%02X ($%04X)", value, address & 0xFF, address );
+      }
+   #endif
 	address &= 0x7FF; // Convert mirrors to actual address
-	((Nes*)sys)->ram[address] = value;
+	((Nes*)sys)->ram[address] = value;  
 }
 
 // -------------------------------------------------------------------------------

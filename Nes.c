@@ -18,7 +18,7 @@ static void initialize( Nes *this )
 {
 	this->ppu.vblank_flag = 0;
 	this->ppu.nmi_enabled = 1;
-	this->ppu.cycles = VBlank_ppu_cycles;
+	this->ppu.cycles = 0;
 }
 // -------------------------------------------------------------------------------
 Nes *Nes_Create()
@@ -35,7 +35,6 @@ Nes *Nes_Create()
 	Cpu6502_Initialize( this->cpu );
 	
 	#ifdef _Cpu6502_Disassembler
-		this->cpu->stack = &this->ram[0x100];
 		this->cpu->read_memory_disasm = read_memory_disasm;
 	#endif
 	
@@ -65,27 +64,25 @@ void Nes_Free( Nes *this )
 // -------------------------------------------------------------------------------
 void Nes_DoFrame( Nes *this )
 {
-	int cpu_cycles;
-	while( this->ppu.cycles > 0 )
+	while( this->ppu.cycles < 341 )
 	{
+      int old_cycles = this->ppu.cycles;
+      this->ppu.cycles += 3 * Cpu6502_CpuStep( this->cpu );      
 		#ifdef _Cpu6502_Disassembler
-			Cpu6502_Disassemble( this->cpu, false );
+			Cpu6502_Disassemble( this->cpu, old_cycles );
 		#endif
-		cpu_cycles = Cpu6502_CpuStep( this->cpu );
-		this->ppu.cycles -= 3 * cpu_cycles;
 	}
-	this->ppu.vblank_flag = 1;
-	if( this->ppu.nmi_enabled )
-	{
-		cpu_cycles = Cpu6502_NMI( this->cpu );
-		this->ppu.cycles -= 3 * cpu_cycles;
-	}
-   #ifdef _Cpu6502_Disassembler
-      else {
-         printf( "NMI Reached but disabled.\n" );
-      }
-   #endif
-	this->ppu.cycles += VBlank_ppu_cycles;	
+	// this->ppu.vblank_flag = 1;
+	// if( this->ppu.nmi_enabled )
+	// {
+	// 	this->ppu.cycles += 3 * Cpu6502_NMI( this->cpu );
+	// }
+ //   #ifdef _Cpu6502_Disassembler
+ //      else {
+ //         printf( "NMI Reached but disabled.\n" );
+ //      }
+ //   #endif
+	this->ppu.cycles -= 341;	
 }
 
 // -------------------------------------------------------------------------------

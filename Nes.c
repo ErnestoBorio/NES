@@ -15,7 +15,7 @@ static void builtin_memory_handlers_init( Nes *this );
 // -------------------------------------------------------------------------------
 static void initialize( Nes *this )
 {
-	this->ppu.cycles = 0;
+	this->ppu.cycles             = 0;
    this->ppu.nmi_enabled        = 1;   
    this->ppu.sprite_height      = 8;
    this->ppu.back_pattern       = 0x1000;
@@ -68,10 +68,7 @@ Nes *Nes_Create()
 void Nes_Reset( Nes *this )
 {
    Cpu6502_Reset( this->cpu );
-   this->ppu.vblank_flag  = 0;
-   this->ppu.sprite0_hit  = 0;
-   this->ppu.sprites_lost = 0;
-   this->ppu.vram_write   = 0;
+   initialize( this );
 }
 
 // -------------------------------------------------------------------------------

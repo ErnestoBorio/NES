@@ -1,12 +1,11 @@
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include "Nes.h"
-#include "MemoryAccess.c"
 
 // How many PPU cycles until starting VBlank. 262 scanlines * 341 ppu cycles (one per pixel)
 #define VBlank_ppu_cycles 262 * 341
+#define VBlank_end_ppu_cycles 20 * 341
 
 #ifdef _Cpu6502_Disassembler
 	static byte read_memory_disasm( void *parent_system, word address );
@@ -16,9 +15,25 @@ static void builtin_memory_handlers_init( Nes *this );
 // -------------------------------------------------------------------------------
 static void initialize( Nes *this )
 {
-	this->ppu.vblank_flag = 0;
-	this->ppu.nmi_enabled = 1;
 	this->ppu.cycles = 0;
+   this->ppu.nmi_enabled        = 1;   
+   this->ppu.sprite_height      = 8;
+   this->ppu.back_pattern       = 0x1000;
+   this->ppu.sprite_pattern     = 0;
+   this->ppu.increment_vram     = 1;
+   this->ppu.scroll_high_bits   = 0;
+   this->ppu.color_emphasis     = 0;
+   this->ppu.sprites_visible    = 1;
+   this->ppu.background_visible = 1;
+   this->ppu.sprite_clip        = 0;
+   this->ppu.background_clip    = 0;
+   this->ppu.monochrome         = 0;
+   this->ppu.vblank_flag        = 0;
+   this->ppu.sprite0_hit        = 0;
+   this->ppu.sprites_lost       = 0;    
+	this->ppu.write_1st_2nd      = 0;
+   this->ppu.horz_scroll        = 0;
+   this->ppu.vert_scroll        = 0;
 }
 // -------------------------------------------------------------------------------
 Nes *Nes_Create()
@@ -50,6 +65,16 @@ Nes *Nes_Create()
 }
 
 // -------------------------------------------------------------------------------
+void Nes_Reset( Nes *this )
+{
+   Cpu6502_Reset( this->cpu );
+   this->ppu.vblank_flag  = 0;
+   this->ppu.sprite0_hit  = 0;
+   this->ppu.sprites_lost = 0;
+   this->ppu.vram_write   = 0;
+}
+
+// -------------------------------------------------------------------------------
 void Nes_Free( Nes *this )
 {
 	if( this->prg_rom != NULL ) {
@@ -64,25 +89,28 @@ void Nes_Free( Nes *this )
 // -------------------------------------------------------------------------------
 void Nes_DoFrame( Nes *this )
 {
-	while( this->ppu.cycles < 341 )
+	while( this->ppu.cycles < VBlank_ppu_cycles )
 	{
-      int old_cycles = this->ppu.cycles;
-      this->ppu.cycles += 3 * Cpu6502_CpuStep( this->cpu );      
+      // int old_cycles = this->ppu.cycles;
+      this->ppu.cycles += 3 * Cpu6502_CpuStep( this->cpu );
+      
 		#ifdef _Cpu6502_Disassembler
-			Cpu6502_Disassemble( this->cpu, old_cycles );
+			Cpu6502_Disassemble( this->cpu, 0 ); // old_cycles );
 		#endif
+      
+      if( this->ppu.cycles > VBlank_end_ppu_cycles ) {
+         this->ppu.vblank_flag = 0;
+      }
 	}
-	// this->ppu.vblank_flag = 1;
-	// if( this->ppu.nmi_enabled )
-	// {
-	// 	this->ppu.cycles += 3 * Cpu6502_NMI( this->cpu );
-	// }
- //   #ifdef _Cpu6502_Disassembler
- //      else {
- //         printf( "NMI Reached but disabled.\n" );
- //      }
- //   #endif
-	this->ppu.cycles -= 341;	
+	
+   this->ppu.vblank_flag = 1;
+   
+	if( this->ppu.nmi_enabled )
+	{
+		this->ppu.cycles += 3 * Cpu6502_NMI( this->cpu );
+	}
+
+	this->ppu.cycles -= VBlank_ppu_cycles;	
 }
 
 // -------------------------------------------------------------------------------
@@ -136,8 +164,7 @@ int Nes_LoadRom( Nes *this, FILE *rom_file )
 	if( ! feof( rom_file ) || ( remaining != 0 ) ) {
 		fprintf( stderr, "The rom file didn't end after CHR-ROM banks as expected.\n" );
 	}
-	
-	Cpu6502_Reset( this->cpu );	
+		
 	return true;
 	
 Exception:
@@ -154,9 +181,45 @@ Exception:
 }
 
 // -------------------------------------------------------------------------------
+#ifdef _Cpu6502_Disassembler
+   static byte read_memory_disasm( void *sys, word address )
+   {
+      // For side effect reads, this should be avoided and direct access should be done instead.
+      // return ((Nes*)sys)->cpu->read_memory[address]( sys, address );
+      if( address < 0x2000 || address >= 0x8000 ) {
+         return ((Nes*)sys)->cpu->read_memory[address]( sys, address );
+      }
+      else {
+         return 0;
+      }
+   }
+#endif
+
+// -------------------------------------------------------------------------------
+byte read_ram( void *sys, word address );
+void write_ram( void *sys, word address, byte value );
+byte read_ram_mirror( void *sys, word address );
+void write_ram_mirror( void *sys, word address, byte value );
+byte read_prg_rom( void *sys, word address );
+void write_ppu_control1( void *sys, word address, byte value );
+void write_ppu_control2( void *sys, word address, byte value );
+byte read_ppu_status( void *sys, word address );
+void write_spr_ram_address( void *sys, word address, byte value  );
+byte read_spr_ram_io( void *sys, word address );
+void write_spr_ram_io( void *sys, word address, byte value  );
+void write_scroll( void *sys, word address, byte value  );
+void write_vram_address( void *sys, word address, byte value  );
+byte read_vram_io( void *sys, word address );
+void write_vram_io( void *sys, word address, byte value  );
+void write_sprite_dma( void *sys, word address, byte value );
+byte read_unimplemented( void *sys, word address );
+void write_unimplemented( void *sys, word address, byte value );
+
+// -------------------------------------------------------------------------------
 static void builtin_memory_handlers_init( Nes *this )
 {
 	int i;
+// RAM
 	for( i=0; i<=0x7FF; ++i ) {
 		this->cpu->read_memory[i] = read_ram;
 		this->cpu->write_memory[i] = write_ram;		
@@ -170,6 +233,7 @@ static void builtin_memory_handlers_init( Nes *this )
       this->cpu->read_memory[i] = read_unimplemented;
       this->cpu->write_memory[i] = write_unimplemented;
    }
+// PPU
 	for( i=0x2000; i<=0x3FFF; i += 8 ) {
 		this->cpu->write_memory[i] = write_ppu_control1;
 		this->cpu->read_memory[i] = read_unimplemented;
@@ -182,17 +246,35 @@ static void builtin_memory_handlers_init( Nes *this )
 		this->cpu->read_memory[i] = read_ppu_status;
 		this->cpu->write_memory[i] = write_unimplemented;
 	}
+   for( i=0x2003; i<=0x3FFF; i += 8 ) {
+      this->cpu->read_memory[i] = read_unimplemented;
+      this->cpu->write_memory[i] = write_spr_ram_address;
+   }
+   for( i=0x2004; i<=0x3FFF; i += 8 ) {
+      this->cpu->read_memory[i] = read_spr_ram_io;
+      this->cpu->write_memory[i] = write_spr_ram_io;
+   }
+   for( i=0x2005; i<=0x3FFF; i += 8 ) {
+      this->cpu->read_memory[i] = read_unimplemented;
+      this->cpu->write_memory[i] = write_scroll;
+   }
+   for( i=0x2006; i<=0x3FFF; i += 8 ) {
+      this->cpu->read_memory[i] = read_unimplemented;
+      this->cpu->write_memory[i] = write_vram_address;
+   }
+   for( i=0x2007; i<=0x3FFF; i += 8 ) {
+      this->cpu->read_memory[i] = read_vram_io;
+      this->cpu->write_memory[i] = write_vram_io;
+   }
+// APU
+// Sprite DMA
+   for( i=0x4014; i<=0x4014; i += 8 ) {
+      this->cpu->read_memory[i] = read_unimplemented;
+      this->cpu->write_memory[i] = write_sprite_dma;
+   }
+// PRG ROM
 	for( i=0x8000; i<=0xFFFF; ++i ) {
 		this->cpu->read_memory[i] = read_prg_rom;
 		this->cpu->write_memory[i] = write_unimplemented;
 	}
 }
-
-// -------------------------------------------------------------------------------
-#ifdef _Cpu6502_Disassembler
-   static byte read_memory_disasm( void *sys, word address )
-   {
-      // For side effect reads, this should be avoided and direct access should be done instead.
-   	return ((Nes*)sys)->cpu->read_memory[address]( sys, address );
-   }
-#endif

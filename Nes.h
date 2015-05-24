@@ -26,15 +26,39 @@ typedef struct // Nes
 	struct
 	{
 		int cycles; // PPU cycles countdown to starting Vblank
-		byte vblank_flag;
-		byte nmi_enabled;
+
+      // $2000
+      byte nmi_enabled;
+      byte sprite_height;  // 8|16
+      word back_pattern;   // 0|$1000
+      word sprite_pattern; // 0|$1000
+      byte increment_vram; // 1|32
+      word scroll_high_bits; // 0..3
+      
+      // $2001
+      byte color_emphasis; // 0..7
+      byte sprites_visible;
+      byte background_visible;
+      byte sprite_clip;
+      byte background_clip;
+      byte monochrome;
+      		
+      // $2002
+      byte vblank_flag;
+      byte sprite0_hit;
+      byte sprites_lost;
+      
+      byte write_1st_2nd; // writes counter for $2005 & $2006. 0 = no write yet. 1 = one write done, waiting for 2nd.
+      byte horz_scroll;
+      byte vert_scroll;
 	} ppu;
 	
 } Nes;
 
 Nes *Nes_Create();
+void Nes_Reset( Nes *this );
 void Nes_Free( Nes *this );
-int Nes_LoadRom( Nes *this, FILE *rom_file );
+int  Nes_LoadRom( Nes *this, FILE *rom_file );
 void Nes_DoFrame( Nes *this );
 
 #endif // #ifndef _Nes_h_

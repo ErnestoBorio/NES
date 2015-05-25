@@ -72,7 +72,7 @@ byte read_ppu_status( void *sys, word address )
       ( NES->ppu.sprites_lost <<5 );
    
    NES->ppu.vblank_flag   = 0; // reset flag once read
-   NES->ppu.write_1st_2nd = 0; // writes count is reset
+   NES->ppu.write_count = 0; // writes count is reset
    
    #ifdef _Cpu6502_Disassembler
       NES->cpu->disasm.value = value;
@@ -83,54 +83,91 @@ byte read_ppu_status( void *sys, word address )
 // $2003
 void write_spr_ram_address( void *sys, word address, byte value  )
 {
+   assert( 0 && "sprite RAM address register not yet implemented"  );
 }
 // $2004
 byte read_spr_ram_io( void *sys, word address )
 {
+   assert( 0 && "Read from sprite RAM not yet implemented"  );
    return 0;
 }
 void write_spr_ram_io( void *sys, word address, byte value  )
 {
+   assert( 0 && "Write to sprite RAM not yet implemented"  );
 }
 // $2005
 void write_scroll( void *sys, word address, byte value  )
 {
-   if( NES->ppu.write_1st_2nd == 0 ) {
+   if( NES->ppu.write_count == 0 ) {
       NES->ppu.horz_scroll = value;
-      NES->ppu.write_1st_2nd = 1;
+      NES->ppu.write_count = 1;
    }
    else {
       NES->ppu.vert_scroll = value;
-      NES->ppu.write_1st_2nd = 0;
+      NES->ppu.write_count = 0;
    }
 }
 // $2006
 void write_vram_address( void *sys, word address, byte value  )
 {
+   if( NES->ppu.write_count == 0 ) {
+      NES->ppu.vram_address = ((word) value & 0x3F ) <<8; // put 6 bits of value in vram_address msb
+      NES->ppu.write_count = 1;
+   }
+   else {
+      NES->ppu.vram_address |= value;
+      NES->ppu.write_count = 0;
+   }
 }
 // $2007
 byte read_vram_io( void *sys, word address )
 {
+   assert( 0 && "VRAM read not yet implemented"  );
    return 0;
 }
 void write_vram_io( void *sys, word address, byte value  )
 {
+   if( NES->ppu.write_count ) {
+      assert( 0 && "Trying to write to VRAM after only setting half of VRAM address, what to do here?" );
+   }
+   
+   word vram_address = NES->ppu.vram_address;
+   if( NES->ppu.vram_address < 0x2000 ) {
+      assert( 0 && "The game is trying to write to CHR-ROM" );
+   }
+   // Name tables and attributes
+   else if( NES->ppu.vram_address < 0x3F00 ) {
+      vram_address -= 0x2000; // Make VRAM address zero based
+      vram_address &= 0x7FF;  // Unmirror
+      NES->ppu.name_attr[ vram_address ] = value;
+      NES->ppu.vram_address += NES->ppu.increment_vram;
+      if( NES->ppu.vram_address >= 0x3F00 ) {
+         assert( 0 && "VRAM address incrementing went outside memory bounds, what should happen now?" );
+      }
+   }
+   // Pallettes
+   else if( NES->ppu.vram_address < 0x4000 ) {
+      // WIP pallettes
+   }
+   else {
+      // maybe vram address should & 0x3FFF
+      assert( 0 && "Trying to access past VRAM $4000, maybe this should mirror-wrap?" );
+   }
 }
 // $4014
 void write_sprite_dma( void *sys, word address, byte value )
 {
+   assert( 0 && "Sprite DMA not yet implemented"  );
 }
 
 // -------------------------------------------------------------------------------
 byte read_unimplemented( void *sys, word address )
 {
-	// printf( "Unimplemented read at $%4X.\n", address );
-	//assert(0);
+	assert( 0 && "Memory read not implemented"  );
 	return 0;
 }
 
 void write_unimplemented( void *sys, word address, byte value )
 {
-	// printf( "Unimplemented write of $%2X at $%4X.\n", value, address );
-	//assert(0);
+	assert( 0 && "Memory write not implemented"  );
 }

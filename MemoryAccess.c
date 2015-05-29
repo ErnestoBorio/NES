@@ -83,17 +83,17 @@ byte read_ppu_status( void *sys, word address )
 // $2003
 void write_spr_ram_address( void *sys, word address, byte value  )
 {
-   assert( 0 && "sprite RAM address register not yet implemented"  );
+//   assert( 0 && "sprite RAM address register not yet implemented"  );
 }
 // $2004
 byte read_spr_ram_io( void *sys, word address )
 {
-   assert( 0 && "Read from sprite RAM not yet implemented"  );
+//   assert( 0 && "Read from sprite RAM not yet implemented"  );
    return 0;
 }
 void write_spr_ram_io( void *sys, word address, byte value  )
 {
-   assert( 0 && "Write to sprite RAM not yet implemented"  );
+//   assert( 0 && "Write to sprite RAM not yet implemented"  );
 }
 // $2005
 void write_scroll( void *sys, word address, byte value  )
@@ -122,7 +122,7 @@ void write_vram_address( void *sys, word address, byte value  )
 // $2007
 byte read_vram_io( void *sys, word address )
 {
-   assert( 0 && "VRAM read not yet implemented"  );
+//   assert( 0 && "VRAM read not yet implemented"  );
    return 0;
 }
 void write_vram_io( void *sys, word address, byte value  )
@@ -141,9 +141,9 @@ void write_vram_io( void *sys, word address, byte value  )
       vram_address &= 0x7FF;  // Unmirror
       NES->ppu.name_attr[ vram_address ] = value;
       NES->ppu.vram_address += NES->ppu.increment_vram;
-      if( NES->ppu.vram_address >= 0x3F00 ) {
-         assert( 0 && "VRAM address incrementing went outside memory bounds, what should happen now?" );
-      }
+      // if( NES->ppu.vram_address >= 0x3F00 ) {
+      //    assert( 0 && "VRAM address incrementing went outside memory bounds, what should happen now?" );
+      // }
    }
    // Pallettes
    else if( NES->ppu.vram_address < 0x4000 ) {
@@ -157,7 +157,7 @@ void write_vram_io( void *sys, word address, byte value  )
 // $4014
 void write_sprite_dma( void *sys, word address, byte value )
 {
-   assert( 0 && "Sprite DMA not yet implemented"  );
+//   assert( 0 && "Sprite DMA not yet implemented"  );
 }
 
 // -------------------------------------------------------------------------------

@@ -11,12 +11,18 @@
 #ifdef _Cpu6502_Disassembler
    static byte read_memory_disasm( void *parent_system, word address );
 #endif
-static void builtin_memory_handlers_init( Nes *this );
+static void init_builtin_memory_handlers( Nes *this );
 
 // -------------------------------------------------------------------------------
 static void initialize( Nes *this )
 {
    byte *temp = this->ppu.name_attr; // WIP hideous hack for now
+   byte *ptrs[] = {
+      this->ppu.name_ptr[0],
+      this->ppu.name_ptr[1],
+      this->ppu.name_ptr[2],
+      this->ppu.name_ptr[3]
+   };
       
    memset( &this->ppu, 0, sizeof( this->ppu ) );
 
@@ -28,6 +34,10 @@ static void initialize( Nes *this )
    this->ppu.back_pattern       = 0x1000;
    
    this->ppu.name_attr = temp; // WIP hideous hack for now
+   this->ppu.name_ptr[0] = ptrs[0];
+   this->ppu.name_ptr[1] = ptrs[1];
+   this->ppu.name_ptr[2] = ptrs[2];
+   this->ppu.name_ptr[3] = ptrs[3];
 }
 // -------------------------------------------------------------------------------
 Nes *Nes_Create()
@@ -53,9 +63,11 @@ Nes *Nes_Create()
    this->chr_rom = NULL;
    
    this->ppu.name_attr = (byte *) malloc( 0x800 );
+   
+   this->chr_unpacked = NULL;
 
    initialize( this );
-   builtin_memory_handlers_init( this );
+   init_builtin_memory_handlers( this );
    
    return this;
 }
@@ -71,9 +83,62 @@ void Nes_Free( Nes *this )
       free( this->chr_rom );
    }
    
-   free( this->ppu.name_attr );
+   if( this->chr_unpacked != NULL ) {
+      free( this->chr_unpacked );
+   }
+   
+   if( this->ppu.name_attr != NULL ) {
+      free( this->ppu.name_attr );
+   }
    
    free( this );
+}
+
+// -------------------------------------------------------------------------------
+void Nes_UnpackChrRom( Nes *this )
+{
+   if( this->chr_unpacked != NULL ) {
+      free( this->chr_unpacked );
+   }
+   
+   // 1 CHR-ROM bank = 2 CHR-ROM tables
+   assert( this->chr_rom_count == 1 ); // for now
+   this->chr_unpacked = (byte *) malloc( 2 * CHR_UNPACKED_size );
+   
+   byte *chr_rom_ptr[] = {
+      &this->chr_rom[0],
+      &this->chr_rom[0x1000]
+   };
+   
+   // Each pointer points to each of the 2 CHR-ROM tables, 0: sprites, 1: background
+   this->chr_unpacked_ptr[0] = &this->chr_unpacked[0];
+   this->chr_unpacked_ptr[1] = &this->chr_unpacked[CHR_UNPACKED_size];
+   
+   for( int chrom = 0; chrom <= 1; ++chrom )
+   {
+      byte *lsb = chr_rom_ptr[chrom];
+      byte *msb = lsb + 8;
+      byte *unpacked = this->chr_unpacked_ptr[chrom];
+      for( int tilen = 0; tilen < 0x100; ++tilen )
+      {
+         for( int line = 0; line <= 7; ++line )
+         {
+            for( int bit = 7; bit >= 0; --bit )
+            {
+               byte color_index = ( *lsb & (1<<bit) ) >>bit;
+               color_index |= ( ( *msb & (1<<bit) ) >>bit ) <<1 ;
+               
+               *unpacked = color_index;
+               assert( unpacked < &this->chr_unpacked[ CHR_UNPACKED_size*2 ] );
+               unpacked++;
+            }
+            ++lsb;
+            ++msb;
+         }
+         lsb += 8;
+         msb += 8;
+      }
+   }
 }
 
 // -------------------------------------------------------------------------------
@@ -154,6 +219,8 @@ int Nes_LoadRom( Nes *this, FILE *rom_file )
    if( read_count != this->chr_rom_count ) {
       goto Exception;
    }
+   
+   Nes_UnpackChrRom( this );
 
    if( header[5] & (1<<3) ) {
       this->ppu.mirroring = mirroring_4screens;
@@ -161,17 +228,18 @@ int Nes_LoadRom( Nes *this, FILE *rom_file )
    }
    else if( header[5] & 1 ) {
       this->ppu.mirroring = mirroring_vertical;
-      // this->ppu.name_ptr[0] = &this->ppu.name_attr[0];
-      // this->ppu.name_ptr[1] = &this->ppu.name_attr[0x400];
-      // this->ppu.name_ptr[2] = &this->ppu.name_attr[0];
-      // this->ppu.name_ptr[3] = &this->ppu.name_attr[0x400];
+      struct ppu_type * ppu = &this->ppu;
+      this->ppu.name_ptr[0] = &this->ppu.name_attr[0];
+      this->ppu.name_ptr[1] = &this->ppu.name_attr[0x400];
+      this->ppu.name_ptr[2] = &this->ppu.name_attr[0];
+      this->ppu.name_ptr[3] = &this->ppu.name_attr[0x400];
    }
    else {
       this->ppu.mirroring = mirroring_horizontal;
-      // this->ppu.name_ptr[0] = &this->ppu.name_attr[0];
-      // this->ppu.name_ptr[1] = &this->ppu.name_attr[0];
-      // this->ppu.name_ptr[2] = &this->ppu.name_attr[0x400];
-      // this->ppu.name_ptr[3] = &this->ppu.name_attr[0x400];
+      this->ppu.name_ptr[0] = &this->ppu.name_attr[0];
+      this->ppu.name_ptr[1] = &this->ppu.name_attr[0];
+      this->ppu.name_ptr[2] = &this->ppu.name_attr[0x400];
+      this->ppu.name_ptr[3] = &this->ppu.name_attr[0x400];
    }
    
    // Extra check to trap any unseen error in reading the rom file
@@ -232,65 +300,77 @@ byte read_unimplemented( void *sys, word address );
 void write_unimplemented( void *sys, word address, byte value );
 
 // -------------------------------------------------------------------------------
-static void builtin_memory_handlers_init( Nes *this )
+
+byte read_ignore( void *sys, word address ) {
+   return 0;
+}
+   
+void write_ignore( void *sys, word address, byte value ) {
+}
+
+static void init_builtin_memory_handlers( Nes *this )
 {
    int i;
 // RAM
    for( i=0; i<=0x7FF; ++i ) {
-      this->cpu->read_memory[i] = read_ram;
+      this->cpu->read_memory[i]  = read_ram;
       this->cpu->write_memory[i] = write_ram;      
    }
    for( i=0x800; i<=0x1FFF; ++i ) {
-      this->cpu->read_memory[i] = read_ram_mirror;
+      this->cpu->read_memory[i]  = read_ram_mirror;
       this->cpu->write_memory[i] = write_ram_mirror;
    }
    // Default all registers as unimplemented and then overwrite each one as they are implemented
    for( i=0x2000; i<=0x7FFF; ++i ) {
-      this->cpu->read_memory[i] = read_unimplemented;
+      this->cpu->read_memory[i]  = read_unimplemented;
       this->cpu->write_memory[i] = write_unimplemented;
    }
 // PPU
    for( i=0x2000; i<=0x3FFF; i += 8 ) {
+      this->cpu->read_memory[i]  = read_ignore; // WIP write only port, should return open bus
       this->cpu->write_memory[i] = write_ppu_control1;
-      this->cpu->read_memory[i] = read_unimplemented;
    }
    for( i=0x2001; i<=0x3FFF; i += 8 ) {
+      this->cpu->read_memory[i]  = read_ignore; // WIP write only port, should return open bus
       this->cpu->write_memory[i] = write_ppu_control2;
-      this->cpu->read_memory[i] = read_unimplemented;
    }
    for( i=0x2002; i<=0x3FFF; i += 8 ) {
-      this->cpu->read_memory[i] = read_ppu_status;
+      this->cpu->read_memory[i]  = read_ppu_status;
       this->cpu->write_memory[i] = write_unimplemented;
    }
    for( i=0x2003; i<=0x3FFF; i += 8 ) {
-      this->cpu->read_memory[i] = read_unimplemented;
+      this->cpu->read_memory[i]  = read_ignore; // WIP write only port, should return open bus
       this->cpu->write_memory[i] = write_spr_ram_address;
    }
    for( i=0x2004; i<=0x3FFF; i += 8 ) {
-      this->cpu->read_memory[i] = read_spr_ram_io;
+      this->cpu->read_memory[i]  = read_spr_ram_io;
       this->cpu->write_memory[i] = write_spr_ram_io;
    }
    for( i=0x2005; i<=0x3FFF; i += 8 ) {
-      this->cpu->read_memory[i] = read_unimplemented;
+      this->cpu->read_memory[i]  = read_ignore; // WIP write only port, should return open bus
       this->cpu->write_memory[i] = write_scroll;
    }
    for( i=0x2006; i<=0x3FFF; i += 8 ) {
-      this->cpu->read_memory[i] = read_unimplemented;
+      this->cpu->read_memory[i]  = read_ignore; // WIP write only port, should return open bus
       this->cpu->write_memory[i] = write_vram_address;
    }
    for( i=0x2007; i<=0x3FFF; i += 8 ) {
-      this->cpu->read_memory[i] = read_vram_io;
+      this->cpu->read_memory[i]  = read_vram_io;
       this->cpu->write_memory[i] = write_vram_io;
    }
 // APU
+   for( i = 0x4000; i < 0x8000; ++i ) {
+      this->cpu->read_memory[i]  = read_ignore;
+      this->cpu->write_memory[i] = write_ignore;
+   }
 // Sprite DMA
    for( i=0x4014; i<=0x4014; i += 8 ) {
-      this->cpu->read_memory[i] = read_unimplemented;
+      this->cpu->read_memory[i]  = read_unimplemented;
       this->cpu->write_memory[i] = write_sprite_dma;
    }
 // PRG ROM
    for( i=0x8000; i<=0xFFFF; ++i ) {
-      this->cpu->read_memory[i] = read_prg_rom;
+      this->cpu->read_memory[i]  = read_prg_rom;
       this->cpu->write_memory[i] = write_unimplemented;
    }
 }

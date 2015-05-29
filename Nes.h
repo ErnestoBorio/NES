@@ -8,6 +8,7 @@
 
 #define PRG_ROM_bank_size 0x4000 // PRG-ROM bank is 16kB
 #define CHR_ROM_bank_size 0x2000 // CHR-ROM bank is  8kB
+#define CHR_UNPACKED_size 0x100 * 8 * 8 // 0x100 tiles * 8 px tall * 8 px wide = 0x4000 bytes at 1 byte per pixel = 16Kb
 #define RAM_size 0x800 // Built-in actual unmirrored RAM is 2kB
 
 enum {
@@ -22,13 +23,15 @@ typedef struct // Nes
    
    byte *chr_rom; // Chunk with all CHR-ROM banks
    int chr_rom_count; // How many 8kB CHR-ROM banks are present
+   byte *chr_unpacked; // 1 byte per pixel translation of CHR-ROM
+   byte *chr_unpacked_ptr[2];
    
    byte *prg_rom; // Chunk with all PRG-ROM banks
    int prg_rom_count; // How many 16kB PRG-ROM banks are present
    
    byte ram[RAM_size]; // Built-in 2kB of RAM
    
-   struct
+   struct ppu_type
    {
       int cycles; // PPU cycles countdown to starting Vblank
 
@@ -59,8 +62,8 @@ typedef struct // Nes
       word vram_address; // VRAM address to read from or write to
       
       byte mirroring;
-      byte *name_attr;    // Chunk of memory for 2 name tables and their attributes
-      // byte *name_ptr[4]; // pointers to the 4 virtual name tables
+      byte *name_attr;   // Chunk of memory for 2 name tables and their attributes
+      byte *name_ptr[4]; // pointers to the 4 virtual name tables
    } ppu;
    
 } Nes;

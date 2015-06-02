@@ -11,6 +11,8 @@
 #define CHR_UNPACKED_size 0x100 * 8 * 8 // 0x100 tiles * 8 px tall * 8 px wide = 0x4000 bytes at 1 byte per pixel = 16Kb
 #define RAM_size 0x800 // Built-in actual unmirrored RAM is 2kB
 
+const byte nes_palette[64][3];
+
 enum {
    mirroring_vertical   = 0,
    mirroring_horizontal = 1,
@@ -31,7 +33,7 @@ typedef struct // Nes
    
    byte ram[RAM_size]; // Built-in 2kB of RAM
    
-   struct ppu_type
+   struct
    {
       int cycles; // PPU cycles countdown to starting Vblank
 
@@ -63,7 +65,9 @@ typedef struct // Nes
       
       byte mirroring;
       byte *name_attr;   // Chunk of memory for 2 name tables and their attributes
-      byte *name_ptr[4]; // pointers to the 4 virtual name tables
+      byte *name_ptr[4]; // pointers to the 4 virtual name tables (2 real)
+      byte *attr_ptr[4]; // pointers to the 4 virtual attribute tables (2 real)
+      byte palettes[0x20]; // WIP should memory be malloc'ed? the Nes itself is malloc'ed anyway.
    } ppu;
    
 } Nes;
@@ -73,5 +77,8 @@ void Nes_Reset( Nes *this );
 void Nes_Free( Nes *this );
 int  Nes_LoadRom( Nes *this, FILE *rom_file );
 void Nes_DoFrame( Nes *this );
+const byte *Nes_GetPaletteColor( Nes *this, byte area, byte palette, byte index );
+
+const byte Nes_rgb[64][3];
 
 #endif // #ifndef _Nes_h_

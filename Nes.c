@@ -16,28 +16,30 @@ static void init_builtin_memory_handlers( Nes *this );
 // -------------------------------------------------------------------------------
 static void initialize( Nes *this )
 {
-   byte *temp = this->ppu.name_attr; // WIP hideous hack for now
-   byte *ptrs[] = {
-      this->ppu.name_ptr[0],
-      this->ppu.name_ptr[1],
-      this->ppu.name_ptr[2],
-      this->ppu.name_ptr[3]
-   };
-      
-   memset( &this->ppu, 0, sizeof( this->ppu ) );
+   Cpu6502_Initialize( this->cpu );
+   
+   this->ppu.nmi_enabled      = 1;
+   this->ppu.sprite_height    = 8;
+   this->ppu.back_pattern     = 0x1000;
+   this->ppu.sprite_pattern   = 0;
+   this->ppu.increment_vram   = 1;
+   this->ppu.scroll_high_bits = 0;
 
-   this->ppu.nmi_enabled        = 1;   
-   this->ppu.sprite_height      = 8;
-   this->ppu.increment_vram     = 1;
+   this->ppu.color_emphasis     = 0;
    this->ppu.sprites_visible    = 1;
    this->ppu.background_visible = 1;
-   this->ppu.back_pattern       = 0x1000;
-   
-   this->ppu.name_attr = temp; // WIP hideous hack for now
-   this->ppu.name_ptr[0] = ptrs[0];
-   this->ppu.name_ptr[1] = ptrs[1];
-   this->ppu.name_ptr[2] = ptrs[2];
-   this->ppu.name_ptr[3] = ptrs[3];
+   this->ppu.sprite_clip        = 0;
+   this->ppu.background_clip    = 0;
+   this->ppu.monochrome         = 0;
+
+   this->ppu.vblank_flag  = 0;
+   this->ppu.sprite0_hit  = 0;
+   this->ppu.sprites_lost = 0;
+   this->ppu.write_count  = 0;
+   this->ppu.horz_scroll  = 0;
+   this->ppu.vert_scroll  = 0;
+   this->ppu.vram_address = 0;
+   this->ppu.mirroring    = 0;
 }
 // -------------------------------------------------------------------------------
 Nes *Nes_Create()
@@ -63,7 +65,10 @@ Nes *Nes_Create()
    this->chr_rom = NULL;
    
    this->ppu.name_attr = (byte *) malloc( 0x800 );
-   
+   memset( this->ppu.name_attr, 0xFF, 0x800 );
+   memset( this->ppu.name_ptr, 0, 4 );
+   memset( this->ppu.attr_ptr, 0, 4 );
+   memset( this->ppu.palettes, 0, 0x20 );
    this->chr_unpacked = NULL;
 
    initialize( this );
@@ -228,11 +233,15 @@ int Nes_LoadRom( Nes *this, FILE *rom_file )
    }
    else if( header[5] & 1 ) {
       this->ppu.mirroring = mirroring_vertical;
-      struct ppu_type * ppu = &this->ppu;
       this->ppu.name_ptr[0] = &this->ppu.name_attr[0];
       this->ppu.name_ptr[1] = &this->ppu.name_attr[0x400];
       this->ppu.name_ptr[2] = &this->ppu.name_attr[0];
       this->ppu.name_ptr[3] = &this->ppu.name_attr[0x400];
+      
+      this->ppu.attr_ptr[0] = &this->ppu.name_attr[0x3C0];
+      this->ppu.attr_ptr[1] = &this->ppu.name_attr[0x7C0];
+      this->ppu.attr_ptr[2] = &this->ppu.name_attr[0x3C0];
+      this->ppu.attr_ptr[3] = &this->ppu.name_attr[0x7C0];
    }
    else {
       this->ppu.mirroring = mirroring_horizontal;
@@ -240,6 +249,11 @@ int Nes_LoadRom( Nes *this, FILE *rom_file )
       this->ppu.name_ptr[1] = &this->ppu.name_attr[0];
       this->ppu.name_ptr[2] = &this->ppu.name_attr[0x400];
       this->ppu.name_ptr[3] = &this->ppu.name_attr[0x400];
+      
+      this->ppu.attr_ptr[0] = &this->ppu.name_attr[0x3C0];
+      this->ppu.attr_ptr[1] = &this->ppu.name_attr[0x3C0];
+      this->ppu.attr_ptr[2] = &this->ppu.name_attr[0x7C0];
+      this->ppu.attr_ptr[3] = &this->ppu.name_attr[0x7C0];
    }
    
    // Extra check to trap any unseen error in reading the rom file
@@ -300,11 +314,10 @@ byte read_unimplemented( void *sys, word address );
 void write_unimplemented( void *sys, word address, byte value );
 
 // -------------------------------------------------------------------------------
-
+// Placeholder functions for not unimplemented accesses that shouldn't halt execution
 byte read_ignore( void *sys, word address ) {
    return 0;
 }
-   
 void write_ignore( void *sys, word address, byte value ) {
 }
 
@@ -374,3 +387,45 @@ static void init_builtin_memory_handlers( Nes *this )
       this->cpu->write_memory[i] = write_unimplemented;
    }
 }
+
+// -------------------------------------------------------------------------------
+// Returns palette 0, color 0 for any color index 0, even for sprite palettes
+const byte *Nes_GetPaletteColor( Nes *this, byte area, byte palette, byte index )
+{
+   byte rgb_index;
+   if( index == 0 ) {
+      rgb_index = this->ppu.palettes[0];
+   }
+   else {
+      rgb_index = this->ppu.palettes[ area * 0x10 + palette * 4 + index ];
+   }
+   return (const byte*) &Nes_rgb[rgb_index];
+}
+
+// -------------------------------------------------------------------------------
+// From: "Matthew Conte" <itsbroke@classicgaming.com>
+// To: "nesdev" <nesdev@onelist.com>
+// Date: Wed, 17 Mar 1999 17:22:56 -0500
+// Subject: [nesdev] NES Palette (modified)
+const byte Nes_rgb[64][3] =
+{ //      0                 1                 2                 3
+   {0x80,0x80,0x80}, {0x00,0x00,0xBB}, {0x37,0x00,0xBF}, {0x84,0x00,0xA6}, // 00
+   {0xBB,0x00,0x6A}, {0xB7,0x00,0x1E}, {0xB3,0x00,0x00}, {0x91,0x26,0x00}, // 04
+   {0x7B,0x2B,0x00}, {0x00,0x3E,0x00}, {0x00,0x48,0x0D}, {0x00,0x3C,0x22}, // 08
+   {0x00,0x2F,0x66}, {0x00,0x00,0x00}, {0x05,0x05,0x05}, {0x05,0x05,0x05}, // 0C
+
+   {0xC8,0xC8,0xC8}, {0x00,0x59,0xFF}, {0x44,0x3C,0xFF}, {0xB7,0x33,0xCC}, // 10
+   {0xFF,0x33,0xAA}, {0xFF,0x37,0x5E}, {0xFF,0x37,0x1A}, {0xD5,0x4B,0x00}, // 14
+   {0xC4,0x62,0x00}, {0x3C,0x7B,0x00}, {0x1E,0x84,0x15}, {0x00,0x95,0x66}, // 18
+   {0x00,0x84,0xC4}, {0x11,0x11,0x11}, {0x09,0x09,0x09}, {0x09,0x09,0x09}, // 1C
+
+   {0xFF,0xFF,0xFF}, {0x00,0x95,0xFF}, {0x6F,0x84,0xFF}, {0xD5,0x6F,0xFF}, // 20
+   {0xFF,0x77,0xCC}, {0xFF,0x6F,0x99}, {0xFF,0x7B,0x59}, {0xFF,0x91,0x5F}, // 24
+   {0xFF,0xA2,0x33}, {0xA6,0xBF,0x00}, {0x51,0xD9,0x6A}, {0x4D,0xD5,0xAE}, // 28
+   {0x00,0xD9,0xFF}, {0x66,0x66,0x66}, {0x0D,0x0D,0x0D}, {0x0D,0x0D,0x0D}, // 2C
+
+   {0xFF,0xFF,0xFF}, {0x84,0xBF,0xFF}, {0xBB,0xBB,0xFF}, {0xD0,0xBB,0xFF}, // 30
+   {0xFF,0xBF,0xEA}, {0xFF,0xBF,0xCC}, {0xFF,0xC4,0xB7}, {0xFF,0xCC,0xAE}, // 34
+   {0xFF,0xD9,0xA2}, {0xCC,0xE1,0x99}, {0xAE,0xEE,0xB7}, {0xAA,0xF7,0xEE}, // 38
+   {0xB3,0xEE,0xFF}, {0xDD,0xDD,0xDD}, {0x11,0x11,0x11}, {0x11,0x11,0x11}  // 3C
+};

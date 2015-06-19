@@ -18,16 +18,16 @@ static void initialize( Nes *this )
 {
    Cpu6502_Initialize( this->cpu );
    
-   this->ppu.nmi_enabled      = 1;
+   this->ppu.nmi_enabled      = 0;
    this->ppu.sprite_height    = 8;
-   this->ppu.back_pattern     = 0x1000;
+   this->ppu.back_pattern     = 0;
    this->ppu.sprite_pattern   = 0;
    this->ppu.increment_vram   = 1;
    this->ppu.scroll_high_bits = 0;
 
    this->ppu.color_emphasis     = 0;
-   this->ppu.sprites_visible    = 1;
-   this->ppu.background_visible = 1;
+   this->ppu.sprites_visible    = 0;
+   this->ppu.background_visible = 0;
    this->ppu.sprite_clip        = 0;
    this->ppu.background_clip    = 0;
    this->ppu.monochrome         = 0;
@@ -35,11 +35,21 @@ static void initialize( Nes *this )
    this->ppu.vblank_flag  = 0;
    this->ppu.sprite0_hit  = 0;
    this->ppu.sprites_lost = 0;
+   
    this->ppu.write_count  = 0;
    this->ppu.horz_scroll  = 0;
    this->ppu.vert_scroll  = 0;
    this->ppu.vram_address = 0;
    this->ppu.mirroring    = 0;
+   
+   // this->scanline    = 0;
+   this->frames      = 0;
+   this->cpu_cycles  = 0;
+   this->ppu_cycles  = 0;
+   
+   memset( this->input.gamepad,    0, sizeof this->input.gamepad );
+   memset( this->input.read_count, 0, sizeof this->input.read_count );
+   this->input.strobe_state = Nes_Strobe_init;
 }
 // -------------------------------------------------------------------------------
 Nes *Nes_Create()
@@ -69,6 +79,7 @@ Nes *Nes_Create()
    memset( this->ppu.name_ptr, 0, 4 );
    memset( this->ppu.attr_ptr, 0, 4 );
    memset( this->ppu.palettes, 0, 0x20 );
+   memset( this->ppu.sprites, 0, 0x100 );
    this->chr_unpacked = NULL;
 
    initialize( this );
@@ -156,28 +167,37 @@ void Nes_Reset( Nes *this )
 // -------------------------------------------------------------------------------
 void Nes_DoFrame( Nes *this )
 {
-   while( this->ppu.cycles < VBlank_ppu_cycles )
+   int cpu_cycles;
+   while( this->ppu_cycles < VBlank_ppu_cycles )
    {
-      // int old_cycles = this->ppu.cycles;
-      this->ppu.cycles += 3 * Cpu6502_CpuStep( this->cpu );
+      cpu_cycles = Cpu6502_CpuStep( this->cpu );
+      
+      this->cpu_cycles += cpu_cycles;
+      this->ppu_cycles += 3 * cpu_cycles;
       
       #ifdef _Cpu6502_Disassembler
-         Cpu6502_Disassemble( this->cpu, 0 ); // old_cycles );
+         Cpu6502_Disassemble( this->cpu, 0 );
       #endif
       
-      if( this->ppu.cycles > VBlank_end_ppu_cycles ) {
+      if( this->ppu_cycles > VBlank_end_ppu_cycles ) {
          this->ppu.vblank_flag = 0;
       }
    }
    
+   this->frames++;
    this->ppu.vblank_flag = 1;
    
    if( this->ppu.nmi_enabled )
    {
-      this->ppu.cycles += 3 * Cpu6502_NMI( this->cpu );
+      cpu_cycles = Cpu6502_NMI( this->cpu );
+      this->cpu_cycles += cpu_cycles;
+      this->ppu_cycles += 3 * cpu_cycles;
    }
-
-   this->ppu.cycles -= VBlank_ppu_cycles; 
+   // scanline 20 spends one cycle less on odd frames
+   if( this->frames % 2 == 1 ) {
+      this->ppu_cycles--;
+   }
+   this->ppu_cycles -= VBlank_ppu_cycles;
 }
 
 // -------------------------------------------------------------------------------
@@ -310,6 +330,9 @@ void write_vram_address( void *sys, word address, byte value  );
 byte read_vram_io( void *sys, word address );
 void write_vram_io( void *sys, word address, byte value  );
 void write_sprite_dma( void *sys, word address, byte value );
+void write_vram_io( void *sys, word address, byte value  );
+byte read_gamepad( void *sys, word address );
+void write_gamepad( void *sys, word address, byte value );
 byte read_unimplemented( void *sys, word address );
 void write_unimplemented( void *sys, word address, byte value );
 
@@ -372,24 +395,28 @@ static void init_builtin_memory_handlers( Nes *this )
       this->cpu->write_memory[i] = write_vram_io;
    }
 // APU
-   for( i = 0x4000; i < 0x8000; ++i ) {
+   for( i = 0x4000; i <= 0x4020; ++i ) {
       this->cpu->read_memory[i]  = read_ignore;
       this->cpu->write_memory[i] = write_ignore;
    }
 // Sprite DMA
-   for( i=0x4014; i<=0x4014; i += 8 ) {
-      this->cpu->read_memory[i]  = read_unimplemented;
-      this->cpu->write_memory[i] = write_sprite_dma;
+   this->cpu->read_memory[0x4014]  = read_unimplemented;
+   this->cpu->write_memory[0x4014] = write_sprite_dma;
+// Input
+   for( i=0x4016; i<=0x4017; ++i ) {
+      this->cpu->read_memory[i]  = read_gamepad;
+      this->cpu->write_memory[i] = write_gamepad;
    }
 // PRG ROM
    for( i=0x8000; i<=0xFFFF; ++i ) {
       this->cpu->read_memory[i]  = read_prg_rom;
-      this->cpu->write_memory[i] = write_unimplemented;
+      this->cpu->write_memory[i] = write_ignore;
    }
 }
 
 // -------------------------------------------------------------------------------
 // Returns palette 0, color 0 for any color index 0, even for sprite palettes
+// area 0 for background palettes, area 1 for sprite palettes
 const byte *Nes_GetPaletteColor( Nes *this, byte area, byte palette, byte index )
 {
    byte rgb_index;
@@ -400,6 +427,12 @@ const byte *Nes_GetPaletteColor( Nes *this, byte area, byte palette, byte index 
       rgb_index = this->ppu.palettes[ area * 0x10 + palette * 4 + index ];
    }
    return (const byte*) &Nes_rgb[rgb_index];
+}
+
+// -------------------------------------------------------------------------------
+void Nes_SetInputState( Nes *this, byte gamepad, byte button, byte state )
+{
+   this->input.gamepad[gamepad][button] = state;
 }
 
 // -------------------------------------------------------------------------------
@@ -420,7 +453,7 @@ const byte Nes_rgb[64][3] =
    {0x00,0x84,0xC4}, {0x11,0x11,0x11}, {0x09,0x09,0x09}, {0x09,0x09,0x09}, // 1C
 
    {0xFF,0xFF,0xFF}, {0x00,0x95,0xFF}, {0x6F,0x84,0xFF}, {0xD5,0x6F,0xFF}, // 20
-   {0xFF,0x77,0xCC}, {0xFF,0x6F,0x99}, {0xFF,0x7B,0x59}, {0xFF,0x91,0x5F}, // 24
+   {0xFF,0x77,0xCC}, {0xFF,0x6F,0x99}, {0xFF,0x7B,0x59}, {0xFF,0xB6,0x00}, // 24
    {0xFF,0xA2,0x33}, {0xA6,0xBF,0x00}, {0x51,0xD9,0x6A}, {0x4D,0xD5,0xAE}, // 28
    {0x00,0xD9,0xFF}, {0x66,0x66,0x66}, {0x0D,0x0D,0x0D}, {0x0D,0x0D,0x0D}, // 2C
 
@@ -429,3 +462,69 @@ const byte Nes_rgb[64][3] =
    {0xFF,0xD9,0xA2}, {0xCC,0xE1,0x99}, {0xAE,0xEE,0xB7}, {0xAA,0xF7,0xEE}, // 38
    {0xB3,0xEE,0xFF}, {0xDD,0xDD,0xDD}, {0x11,0x11,0x11}, {0x11,0x11,0x11}  // 3C
 };
+
+// http://www.thealmightyguru.com/Games/Hacking/Wiki/index.php?title=NES_Palette
+// 7C,7C,7C
+// 00,00,FC
+// 00,00,BC
+// 44,28,BC
+// 94,00,84
+// A8,00,20
+// A8,10,00
+// 88,14,00
+// 50,30,00
+// 00,78,00
+// 00,68,00
+// 00,58,00
+// 00,40,58
+// 00,00,00
+// 00,00,00
+// 00,00,00
+// BC,BC,BC
+// 00,78,F8
+// 00,58,F8
+// 68,44,FC
+// D8,00,CC
+// E4,00,58
+// F8,38,00
+// E4,5C,10
+// AC,7C,00
+// 00,B8,00
+// 00,A8,00
+// 00,A8,44
+// 00,88,88
+// 00,00,00
+// 00,00,00
+// 00,00,00
+// F8,F8,F8
+// 3C,BC,FC
+// 68,88,FC
+// 98,78,F8
+// F8,78,F8
+// F8,58,98
+// F8,78,58
+// FC,A0,44
+// F8,B8,00
+// B8,F8,18
+// 58,D8,54
+// 58,F8,98
+// 00,E8,D8
+// 78,78,78
+// 00,00,00
+// 00,00,00
+// FC,FC,FC
+// A4,E4,FC
+// B8,B8,F8
+// D8,B8,F8
+// F8,B8,F8
+// F8,A4,C0
+// F0,D0,B0
+// FC,E0,A8
+// F8,D8,78
+// D8,F8,78
+// B8,F8,B8
+// B8,F8,D8
+// 00,FC,FC
+// F8,D8,F8
+// 00,00,00
+// 00,00,00

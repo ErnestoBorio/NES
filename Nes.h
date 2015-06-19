@@ -19,6 +19,24 @@ enum {
    mirroring_4screens   = 2
 };
 
+enum Nes_Buttons {
+   Nes_A      = 0,
+   Nes_B      = 1,
+   Nes_Select = 2,
+   Nes_Start  = 3,
+   Nes_Up     = 4,
+   Nes_Down   = 5,
+   Nes_Left   = 6,
+   Nes_Right  = 7
+};
+
+enum Nes_Strobe {
+   Nes_Strobe_clear = 0,
+   Nes_Strobe_reset = 1,
+   Nes_Strobe_reading = 2,
+   Nes_Strobe_init = 3
+};
+
 typedef struct // Nes
 {
    Cpu6502 *cpu;
@@ -32,11 +50,14 @@ typedef struct // Nes
    int prg_rom_count; // How many 16kB PRG-ROM banks are present
    
    byte ram[RAM_size]; // Built-in 2kB of RAM
+
+   // int scanline;   
+   int frames;
+   long cpu_cycles;
+   long ppu_cycles;
    
    struct
    {
-      int cycles; // PPU cycles countdown to starting Vblank
-
       // $2000
       byte nmi_enabled;
       byte sprite_height;  // 8|16
@@ -68,7 +89,14 @@ typedef struct // Nes
       byte *name_ptr[4]; // pointers to the 4 virtual name tables (2 real)
       byte *attr_ptr[4]; // pointers to the 4 virtual attribute tables (2 real)
       byte palettes[0x20]; // WIP should memory be malloc'ed? the Nes itself is malloc'ed anyway.
+      byte sprites[0x100];
    } ppu;
+   
+   struct {
+      byte gamepad[2][8]; // Holds the pressed state [0|1] of the buttons of both gamepads
+      byte strobe_state;
+      byte read_count[2];
+   } input;
    
 } Nes;
 
@@ -78,6 +106,8 @@ void Nes_Free( Nes *this );
 int  Nes_LoadRom( Nes *this, FILE *rom_file );
 void Nes_DoFrame( Nes *this );
 const byte *Nes_GetPaletteColor( Nes *this, byte area, byte palette, byte index );
+
+void Nes_SetInputState( Nes *this, byte gampead, byte button, byte state );
 
 const byte Nes_rgb[64][3];
 

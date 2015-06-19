@@ -1,3 +1,4 @@
+#include <string.h>
 #include <assert.h>
 #include "Nes.h"
 
@@ -164,9 +165,58 @@ void write_vram_io( void *sys, word register_address, byte value  )
 }
 // -------------------------------------------------------------------------------
 // $4014
+// WIP: OAM DMA starts on RAM address written to $2003
 void write_sprite_dma( void *sys, word address, byte value )
 {
-//   assert( 0 && "Sprite DMA not yet implemented"  );
+   if( value > 0x1F ) {
+      assert( 0 && "Copying sprite DMA from outside RAM, weird." );
+   }
+   address = ( value & 0x7 ) <<8; // shamelessly reusing unused `address`
+   memcpy( NES->ppu.sprites, &NES->ram[address], 0x100 );
+   int cpu_cycles = ( NES->cpu_cycles % 2 == 1 ) ? 514 : 513; // +1 cycle on odd CPU cycles
+   NES->cpu_cycles += cpu_cycles;
+   NES->ppu_cycles += 3 * cpu_cycles;
+}
+// -------------------------------------------------------------------------------
+// $4016
+byte read_gamepad( void *sys, word address )
+{
+   byte value = 0;
+   if( NES->input.strobe_state == Nes_Strobe_clear )
+   {
+      NES->input.strobe_state = Nes_Strobe_reading;
+      NES->input.read_count[0] = NES->input.read_count[1] = 0;
+   }
+   if( NES->input.strobe_state == Nes_Strobe_reading )
+   {
+      if(( address == 0x4016 ) && ( NES->input.read_count[0] <= 7 )) {
+         value = NES->input.gamepad[0][ NES->input.read_count[0] ];
+         NES->input.read_count[0]++;
+      }
+      else if(( address == 0x4017 ) && ( NES->input.read_count[1] <= 7 )) {
+         value = NES->input.gamepad[1][ NES->input.read_count[1] ];
+         NES->input.read_count[1]++;
+      }
+   }
+   return value;
+}
+
+void write_gamepad( void *sys, word address, byte value )
+{
+   // Ignore writes to 0x4017 for now
+   if( address == 0x4016 )
+   {
+      if( value == 1 ) {
+         NES->input.strobe_state = Nes_Strobe_reset;
+      }
+      else if( value == 0 ) {
+         if( NES->input.strobe_state == Nes_Strobe_reset ) {
+            NES->input.strobe_state = Nes_Strobe_clear;
+         }
+         // else: what should happen if 0 is written when not in reset state?
+      }
+      // else: Some games write $C0 here for APU thingies. Ignore for now
+   }
 }
 // -------------------------------------------------------------------------------
 byte read_unimplemented( void *sys, word address )

@@ -83,6 +83,7 @@ typedef struct // Nes
       byte horz_scroll;
       byte vert_scroll;
       word vram_address; // VRAM address to read from or write to
+      byte vram_latch;
       
       byte mirroring;
       byte *name_attr;   // Chunk of memory for 2 name tables and their attributes

@@ -74,7 +74,7 @@ byte read_ppu_status( void *sys, word address )
       ( NES->ppu.sprite0_hit  <<6 ) |
       ( NES->ppu.sprites_lost <<5 );
    
-   NES->ppu.vblank_flag   = 0; // reset flag once read
+   NES->ppu.vblank_flag = 0; // reset flag once read
    NES->ppu.write_count = 0; // writes count is reset
    
    #ifdef _Cpu6502_Disassembler
@@ -131,13 +131,40 @@ void write_vram_address( void *sys, word register_address, byte value  )
 // $2007
 byte read_vram_io( void *sys, word register_address )
 {
-   // VRAM read not yet implemented
-   return 0;
+   byte old_latch = NES->ppu.vram_latch;
+   
+   if( NES->ppu.write_count > 0 ) {
+      assert( 0 && "Trying to write to VRAM after only setting half of VRAM address, what to do here?" );
+   }
+   
+   word vram_address = NES->ppu.vram_address;
+   NES->ppu.vram_address += NES->ppu.increment_vram;
+   NES->ppu.vram_address &= 0x3FFF;
+   
+   // Palettes
+   if( vram_address >= 0x3F00 )
+   {
+      vram_address &= 0x1F; // Make VRAM address zero based and Unmirror
+      if( vram_address == 0x10 || vram_address == 0x14 || vram_address == 0x18 || vram_address == 0x1C ) {
+         vram_address -= 0x10; // Sprite colors 0 mirror background colors 0
+      }
+      NES->ppu.vram_latch = NES->ppu.palettes[ vram_address ];
+      return NES->ppu.vram_latch;
+   }
+   // Name tables and attributes
+   else if( vram_address < 0x3F00 ) {
+      vram_address &= 0x7FF; // Make VRAM address zero based and Unmirror
+      NES->ppu.vram_latch = NES->ppu.name_attr[ vram_address ];
+   }
+   else {
+      assert(0 && "Reading Pattern tables.");
+   }
+   return old_latch;
 }
 // -------------------------------------------------------------------------------
 void write_vram_io( void *sys, word register_address, byte value  )
 {
-   if( NES->ppu.write_count ) {
+   if( NES->ppu.write_count > 0 ) {
       assert( 0 && "Trying to write to VRAM after only setting half of VRAM address, what to do here?" );
    }
    

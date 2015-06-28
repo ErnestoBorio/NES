@@ -9,7 +9,6 @@
 #define PRG_ROM_bank_size 0x4000 // PRG-ROM bank is 16kB
 #define CHR_ROM_bank_size 0x2000 // CHR-ROM bank is  8kB
 #define CHR_UNPACKED_size 0x100 * 8 * 8 // 0x100 tiles * 8 px tall * 8 px wide = 0x4000 bytes at 1 byte per pixel = 16Kb
-#define RAM_size 0x800 // Built-in actual unmirrored RAM is 2kB
 
 const byte nes_palette[64][3];
 
@@ -49,12 +48,16 @@ typedef struct // Nes
    byte *prg_rom; // Chunk with all PRG-ROM banks
    int prg_rom_count; // How many 16kB PRG-ROM banks are present
    
-   byte ram[RAM_size]; // Built-in 2kB of RAM
+   byte ram[0x800]; // Built-in 2kB of RAM
+   byte save_ram[0x2000]; // Battery backed RAM
 
-   // int scanline;   
-   int frames;
-   long cpu_cycles;
-   long ppu_cycles;
+   int scanline;        // scanline number currently being rendered [-1..260]
+   int scanpixel;       // pixel number of current scanline being rendered [0..340]
+   int last_scanpixel;  // to compare the range of pixels rendered during last step
+   int frames;          // frames rendered since reset
+   int vblank;          // internal vblank flag that is not reset when read
+   long cpu_cycles;     // CPU cycles executed since reset
+   long ppu_cycles;     // PPU cycles executed since reset (3 PPU cycles per each CPU cycle)
    
    struct
    {

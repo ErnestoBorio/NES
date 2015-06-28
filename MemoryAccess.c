@@ -20,14 +20,23 @@ void write_ram( void *sys, word address, byte value )
 // $800..$1FFF mirrored RAM
 byte read_ram_mirror( void *sys, word address )
 {
-	address &= 0x7FF; // Convert mirrors to actual address
-	return NES->ram[address];
+	return NES->ram[address & 0x7FF]; // Convert mirrors to actual address
 }
 
 void write_ram_mirror( void *sys, word address, byte value )
 {
-	address &= 0x7FF; // Convert mirrors to actual address
-	NES->ram[address] = value;  
+	NES->ram[address & 0x7FF] = value; // Convert mirrors to actual address
+}
+
+// -------------------------------------------------------------------------------
+byte read_save_ram( void *sys, word address )
+{
+   return NES->save_ram[ address - 0x6000 ];
+}
+
+void write_save_ram( void *sys, word address, byte value )
+{
+   NES->save_ram[ address - 0x6000 ] = value;
 }
 
 // -------------------------------------------------------------------------------

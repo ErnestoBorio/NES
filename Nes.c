@@ -42,10 +42,13 @@ static void initialize( Nes *this )
    this->ppu.vram_address = 0;
    this->ppu.mirroring    = 0;
    
-   // this->scanline    = 0;
-   this->frames      = 0;
-   this->cpu_cycles  = 0;
-   this->ppu_cycles  = 0;
+   this->cpu_cycles      = 0;
+   this->ppu_cycles      = 0;
+   this->frames          = 0;
+   this->scanline        = -1;
+   this->scanpixel       = 0;
+   this->vblank          = 0;
+   this->last_scanpixel  = 0;
    
    memset( this->input.gamepad,    0, sizeof this->input.gamepad );
    memset( this->input.read_count, 0, sizeof this->input.read_count );
@@ -73,6 +76,9 @@ Nes *Nes_Create()
    this->prg_rom = NULL;
    this->chr_rom_count = 0;
    this->chr_rom = NULL;
+
+   memset( this->ram, 0, 0x800 );
+   memset( this->save_ram, 0, 0x2000 );
    
    this->ppu.name_attr = (byte *) malloc( 0x800 );
    memset( this->ppu.name_attr, 0xFF, 0x800 );
@@ -94,19 +100,14 @@ void Nes_Free( Nes *this )
    if( this->prg_rom != NULL ) {
       free( this->prg_rom );
    }
-   
    if( this->chr_rom != NULL ) {
       free( this->chr_rom );
    }
-   
    if( this->chr_unpacked != NULL ) {
       free( this->chr_unpacked );
    }
-   
-   if( this->ppu.name_attr != NULL ) {
       free( this->ppu.name_attr );
    }
-   
    free( this );
 }
 
@@ -165,39 +166,70 @@ void Nes_Reset( Nes *this )
 }
 
 // -------------------------------------------------------------------------------
+void check_sprite0hit( Nes *this );
+
 void Nes_DoFrame( Nes *this )
 {
-   int cpu_cycles;
-   while( this->ppu_cycles < VBlank_ppu_cycles )
+   int cpu_cycles = 0;
+   int vblank_started = 0;
+   while( 1 )
    {
-      cpu_cycles = Cpu6502_CpuStep( this->cpu );
+      if(( this->scanline == 241 ) && ( this->vblank == 0 ))
+      {
+         this->frames++;
+         this->ppu.vblank_flag = 1;
+         this->vblank = 1;
+         vblank_started = 1;
+         if( this->ppu.nmi_enabled )
+         {
+            cpu_cycles = Cpu6502_NMI( this->cpu );
+         }
+      }
+      else
+      {
+         cpu_cycles = Cpu6502_CpuStep( this->cpu );
+      }
       
       this->cpu_cycles += cpu_cycles;
       this->ppu_cycles += 3 * cpu_cycles;
+
+      this->last_scanpixel = this->scanpixel;
+      this->scanpixel += 3 * cpu_cycles;
       
-      #ifdef _Cpu6502_Disassembler
-         Cpu6502_Disassemble( this->cpu, 0 );
-      #endif
+      if( this->scanpixel >= 341 )
+      {
+         this->scanpixel -= 341;
+         this->scanline++;
+         
+         if( this->scanline >= 261 )
+         {
+            this->scanline = -1;
+            this->ppu.sprite0_hit = 0; // WIP this actually happens on scanpixel 1, but does it matter?
+            this->ppu.vblank_flag = 0; // WIP this may actually happen on next scanline (0)
+            this->vblank = 0;
+         }
+      }
       
-      if( this->ppu_cycles > VBlank_end_ppu_cycles ) {
-         this->ppu.vblank_flag = 0;
+      if( vblank_started ) { // Reaching scanline 241
+         break;
+      }
+      
+      // if last rendered pixels lie inside the visible screen and collide with the sprite 0 area
+      if(( this->scanline > -1 ) && ( this->scanline < 240 ) && ( this->last_scanpixel < 256 ) // WIP this will change when scroll is implemented
+         && ( this->ppu.sprite0_hit == 0 )
+         && ( this->ppu.sprites[0] >= this->scanline - 8 ) && ( this->ppu.sprites[0] <= this->scanline )
+         && ( this->ppu.sprites[3] >= this->scanpixel - 8 ) && ( this->ppu.sprites[3] <= this->scanpixel ))
+      {
+         check_sprite0hit( this );
       }
    }
-   
-   this->frames++;
-   this->ppu.vblank_flag = 1;
-   
-   if( this->ppu.nmi_enabled )
-   {
-      cpu_cycles = Cpu6502_NMI( this->cpu );
-      this->cpu_cycles += cpu_cycles;
-      this->ppu_cycles += 3 * cpu_cycles;
-   }
-   // scanline 20 spends one cycle less on odd frames
-   if( this->frames % 2 == 1 ) {
-      this->ppu_cycles--;
-   }
-   this->ppu_cycles -= VBlank_ppu_cycles;
+}
+
+// http://wiki.nesdev.com/w/index.php/PPU_OAM
+void check_sprite0hit( Nes *this )
+{
+   this->ppu.sprite0_hit = 1;
+   printf( "S0h %03d,%03d frame %03d\n", this->scanpixel, this->scanline, this->frames );
 }
 
 // -------------------------------------------------------------------------------
@@ -314,30 +346,8 @@ Exception:
 #endif
 
 // -------------------------------------------------------------------------------
-byte read_ram( void *sys, word address );
-void write_ram( void *sys, word address, byte value );
-byte read_ram_mirror( void *sys, word address );
-void write_ram_mirror( void *sys, word address, byte value );
-byte read_prg_rom( void *sys, word address );
-void write_ppu_control1( void *sys, word address, byte value );
-void write_ppu_control2( void *sys, word address, byte value );
-byte read_ppu_status( void *sys, word address );
-void write_spr_ram_address( void *sys, word address, byte value  );
-byte read_spr_ram_io( void *sys, word address );
-void write_spr_ram_io( void *sys, word address, byte value  );
-void write_scroll( void *sys, word address, byte value  );
-void write_vram_address( void *sys, word address, byte value  );
-byte read_vram_io( void *sys, word address );
-void write_vram_io( void *sys, word address, byte value  );
-void write_sprite_dma( void *sys, word address, byte value );
-void write_vram_io( void *sys, word address, byte value  );
-byte read_gamepad( void *sys, word address );
-void write_gamepad( void *sys, word address, byte value );
-byte read_unimplemented( void *sys, word address );
-void write_unimplemented( void *sys, word address, byte value );
+#include "MemoryAccess.h"
 
-// -------------------------------------------------------------------------------
-// Placeholder functions for not unimplemented accesses that shouldn't halt execution
 byte read_ignore( void *sys, word address ) {
    return 0;
 }
@@ -406,6 +416,11 @@ static void init_builtin_memory_handlers( Nes *this )
    for( i=0x4016; i<=0x4017; ++i ) {
       this->cpu->read_memory[i]  = read_gamepad;
       this->cpu->write_memory[i] = write_gamepad;
+   }
+// Save RAM
+   for( i=0x6000; i<=0x7FFF; ++i ) {
+      this->cpu->read_memory[i]  = read_save_ram;
+      this->cpu->write_memory[i] = write_save_ram;
    }
 // PRG ROM
    for( i=0x8000; i<=0xFFFF; ++i ) {
